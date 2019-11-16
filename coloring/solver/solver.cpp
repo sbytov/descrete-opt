@@ -47,18 +47,14 @@ private:
 
         bool operator() (int n1, int n2) const
         {
-            //std::cout << "cmp " << n1 << " and " << n2 << " = ";
             if (m_constraints[n1].size() != m_constraints[n2].size())
             {
-                //std::cout << true << std::endl;
                 return m_constraints[n1].size() > m_constraints[n2].size();
             }
             if (m_g.adj[n1].size() != m_g.adj[n2].size())
             {
-                //std::cout << true << std::endl;
                 return m_g.adj[n1].size() > m_g.adj[n2].size();
             }
-            //std::cout << (n1>n2) << std::endl;
             return n1 > n2;
         }
     };
@@ -69,92 +65,95 @@ private:
     std::vector<int> m_solution;
     int m_cmax = std::numeric_limits<int>::max();
 
-    int color(int n, int cmax, int& counter, int level) 
+    int color(int n, int cmax, int level) 
     {
         if (n == -1)
         {
-#ifdef _DEBUG
             std::cout << "done coloring with cmax " << cmax << std::endl; 
-#endif
             if (m_cmax > cmax)
             {
                 m_cmax = cmax;
                 m_solution = m_colors;
             }
             g_c++;
+            exit(1);
             return cmax;
         }
         auto affected = m_nodes->erase(n);
         int prev_c = -1;
         int cres = -1;
         std::string indent = std::string(level, '.');
-        for (int c = cmax; c >= 1; c--)
+
+        int s = 0;
+        for (int c = 1; c <= cmax; c++)
         {
             if (m_constraints[n].count(c) > 0)
             {
                 continue;
             }
 #ifdef _DEBUG
-            std::cout << indent.c_str() << "color " << n << " into " << c << std::endl;
+            std::cout << indent.c_str() << "color " << n << " into " << c << log_constraints(n) << std::endl;
 #endif
             update_constraint(n, c, prev_c);
             prev_c = c;
             int depth = 0;
-            cres = color(next(), cmax, ++depth, level + 1);
-            counter += depth;
-            log_cres(c, cres, cmax, n, indent, false, constr);
+            auto nn = next();
+            cres = color(nn, cmax, level + 1);
+            log_cres(c, cres, cmax, n, indent, false);
             if (cres == cmax)
             {
                 break;
             }
-
-
             //if (depth > 1000000) {
             //    counter = 0;
             //    break;
             //}
             //remove_constraint(n, c);
         }
-        if (cmax + 1 < m_cmax)
+        if (cmax + 1 < m_cmax
+           /* && s <= quota*/)
         {
 #ifdef _DEBUG
-            std::cout << indent.c_str() << "color " << n << " into " << cmax + 1 << " (max)" << std::endl;
+            std::cout << indent.c_str() << "color " << n << " into " << cmax + 1 << " (max)" << log_constraints(n) << std::endl;
 #endif
             update_constraint(n, cmax + 1, prev_c);
             prev_c = cmax + 1;
             int depth = 0;
-            auto nx = next();
-            std::unordered_map<int, int> constr;
-            if (nx != -1) constr = m_constraints[nx];
-            cres = color(nx, cmax + 1, ++depth, level+1);
-            log_cres(cmax+1, cres, cmax, n, indent, true, constr);
-            counter += depth;
+            int nn = next();
+            cres = color(nn, cmax + 1, level + 1);
+            log_cres(cmax+1, cres, cmax, n, indent, true);
         }
         if (prev_c != -1) remove_constraint(n, prev_c);
         m_nodes->insert(n);
         return cres;
     }
 
-    void log_cres(int c, int cres, int cmax, int n, std::string& indent, bool last, std::unordered_map<int,int>& constraints) {
+    std::string log_constraints(int n) {
         std::ostringstream oss;
-        oss << "[";
-        for (auto& c : constraints)
+        oss << " [";
+        for (auto& c : m_constraints[n])
         {
             oss << c.first << ",";
         }
         oss << "]";
+        return oss.str();
+    }
+
+    void log_cres(int c, int cres, int cmax, int n, std::string& indent, bool last) {
+#ifdef _DEBUG
         if (cres == cmax)
         {
             std::cout << indent.c_str() << "found best possible coloring: node " << n << ", color " << c << ", skip the rest" << std::endl;
         }
         else if (cres == -1)
         {
-            std::cout << indent.c_str() << "couldn't find any possible coloring: node " << n << ", color " << c << (last ? "(last)" : "") << " " << oss.str().c_str() << std::endl;
+            std::cout << indent.c_str() << "couldn't find any possible coloring: node " << n << ", color " << c << (last ? "(last)" : "") << " " << std::endl;
         }
         else
         {
             std::cout << indent.c_str() << "found possible coloring: node " << n << ", color " << c << (last ? "(last)" : ", look further ") << std::endl;
         }
+#endif
     }
 
     int next() {
@@ -162,7 +161,17 @@ private:
         {
             return -1;
         }
-        return *m_nodes->begin();
+        auto n = *m_nodes->begin();
+        if (m_colors[n] != 0)
+        {
+            std::cout << "OHHHHHH SOMETHING BAD" << std::endl;
+        }
+        //if (m_nodes->size() > 1)
+        //{
+        //    auto nn = *(++m_nodes->begin());
+        //    return nn;
+        //}
+        return n;
     }
 
     void update_constraint(int n, int c, int prev_c) {
@@ -240,25 +249,18 @@ private:
 
 
 public:
-    Solver(const Graph& g) : m_g{ g }
+    Solver(const Graph& g, uint64_t quota) : m_g{ g }
     {
         m_constraints.resize(g.adj.size());
         m_colors.resize(g.adj.size());
         m_nodes = std::make_unique<std::set<int, comparator >>(comparator{m_g, m_constraints});
-
-        int start = 0;
-        int maxDegree = 0;
         for (int n = 0; n < g.adj.size(); n++)
         {
-            if (g.adj[n].size() > maxDegree)
-            {
-                maxDegree = g.adj[n].size();
-                start = n;
-            }
+            m_nodes->insert(n);
         }
 
-        int t = 0;
-        color(start, 0, t, 0);
+        std::vector<int> coloring(m_g.adj.size(), 0);
+        color(*m_nodes->begin(), 0, 0);
     }
 
     std::pair<int, std::vector<int> > solution() {
@@ -268,10 +270,16 @@ public:
 
 int main(int argc, char *argv[])
 {
-    if (argc != 2)
+    if (argc < 2)
     {
         std::cout << "incorrect input";
         return -1;
+    }
+
+    uint64_t quota = 100000000;
+    if (argc == 3)
+    {
+        quota = atoi(argv[2]);
     }
 
     std::ifstream in(argv[1]);
@@ -293,7 +301,7 @@ int main(int argc, char *argv[])
     auto begin = std::chrono::system_clock::now();
     Graph g{n, edges};
     std::cout << "=== BEGIN ===\n ";
-    Solver slv{ g };
+    Solver slv{ g, quota };
     auto end = std::chrono::system_clock::now();
     auto sol = slv.solution();
     std::cout << sol.first << " " << 1 << std::endl;
