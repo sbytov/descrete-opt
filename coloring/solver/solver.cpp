@@ -14,6 +14,7 @@
 #include <cassert>
 #include <chrono>
 #include <sstream>
+#include <future>
 
 struct Graph {
     Graph(int n, std::vector< std::pair<int, int> > edges) {
@@ -29,6 +30,7 @@ struct Graph {
 
 
 int g_c = 0;
+std::atomic<bool> g_abort = false;
 
 struct Solver {
 private:
@@ -67,16 +69,22 @@ private:
 
     int color(int n, int cmax, int level) 
     {
+        if (g_abort) return -1;
+
         if (n == -1)
         {
+#ifdef _DEBUG
             std::cout << "done coloring with cmax " << cmax << std::endl; 
+#endif
             if (m_cmax > cmax)
             {
                 m_cmax = cmax;
                 m_solution = m_colors;
             }
             g_c++;
+#ifdef _DEBUG
             exit(1);
+#endif
             return cmax;
         }
         auto affected = m_nodes->erase(n);
@@ -84,7 +92,6 @@ private:
         int cres = -1;
         std::string indent = std::string(level, '.');
 
-        int s = 0;
         for (int c = 1; c <= cmax; c++)
         {
             if (m_constraints[n].count(c) > 0)
@@ -104,10 +111,6 @@ private:
             {
                 break;
             }
-            //if (depth > 1000000) {
-            //    counter = 0;
-            //    break;
-            //}
             //remove_constraint(n, c);
         }
         if (cmax + 1 < m_cmax
@@ -300,16 +303,25 @@ int main(int argc, char *argv[])
 
     auto begin = std::chrono::system_clock::now();
     Graph g{n, edges};
-    std::cout << "=== BEGIN ===\n ";
-    Solver slv{ g, quota };
+   // std::cout << "=== BEGIN ===\n ";
+    auto fut = std::async(std::launch::async, [&]() {
+        Solver slv{ g, quota };
+        auto sol = slv.solution();
+        return sol;
+    });
+    auto status = fut.wait_for(std::chrono::seconds(60));
+    if (status == std::future_status::timeout)
+    {
+        g_abort = true;
+    }
+    auto sol = fut.get();
     auto end = std::chrono::system_clock::now();
-    auto sol = slv.solution();
-    std::cout << sol.first << " " << 1 << std::endl;
+    std::cout << sol.first << " " << (g_abort ? 0 : 1)  << std::endl;
     for (auto& c : sol.second)
     {
         std::cout << c << " ";
     }
 #ifdef _DEBUG
+    std::cout << " === " << g_c << " in " << std::chrono::duration_cast<std::chrono::seconds>(end - begin).count() << " sec.";
 #endif
-    std::cout << " === " << g_c << " in " << std::chrono::duration_cast<std::chrono::seconds>(end-begin).count() << " sec.";
-}
+    }
